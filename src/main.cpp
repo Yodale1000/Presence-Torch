@@ -6,15 +6,23 @@
 #include <secrets.h>
 #include <led.h>
 
-#define DELAY 5000
-#define THRESHOLD 80
+#define THRESHOLD 80 //in cm
 
-Ultrasonic ultrasonic(23);
+#define USS1_PIN 23
+#define USS2_PIN 24
+#define USS3_PIN 25
+#define USS4_PIN 26
+
+
+Ultrasonic uss_1(USS1_PIN);
+Ultrasonic uss_2(USS2_PIN);
+Ultrasonic uss_3(USS3_PIN);
+Ultrasonic uss_4(USS4_PIN);
+
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+
 WiFiClient net;
 MQTTClient client; 
-
-unsigned long lastMillis = 0;
 
 void connect() {
   Serial.print("checking wifi...");
@@ -67,30 +75,30 @@ void loop() {
   delay(10);
 
   if (!client.connected()) {
+    setAll(255,0,0);
     connect();
   }
 
-/* 
-  if (millis() - lastMillis > 1000) {
-    lastMillis = millis();
-    client.publish(MQTT_TOPIC, "world");
-  }
-*/
-  
-  long RangeInCentimeters;
-	RangeInCentimeters = ultrasonic.MeasureInCentimeters();
+  strip.clear();
 
-  if (RangeInCentimeters < THRESHOLD)
-  {
-    FadeIn(255,128,0);
-    delay(DELAY);
-    FadeOut(255,80,0);
+  int triggeredCount = 0;
+
+  if (uss_1.MeasureInCentimeters() < THRESHOLD) {
+    triggeredCount++;
   }
-  else
-  {
-    strip.clear();
-    strip.show();
+  if (uss_2.MeasureInCentimeters() < THRESHOLD) {
+    triggeredCount++;
   }
+  if (uss_3.MeasureInCentimeters() < THRESHOLD) {
+    triggeredCount++;
+  }
+  if (uss_4.MeasureInCentimeters() < THRESHOLD) {
+    triggeredCount++;
+  }
+
+  int brightness = map(0, 0, 4, 0, 255);
+  strip.setBrightness(brightness);
+  strip.show();
   
   delay(1000);
 }
