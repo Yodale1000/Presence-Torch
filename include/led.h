@@ -1,6 +1,6 @@
 #include <Adafruit_NeoPixel.h>
 
-#define LED_PIN 22
+#define LED_PIN 23
 #define LED_COUNT 16
 
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -47,4 +47,8 @@ void FadeOut(byte red, byte green, byte blue){
 void FadeInOut(byte red, byte green, byte blue){
   FadeIn(red, green, blue);
   FadeOut(red, green, blue);
+}
+
+void SetBrightness(int brightness) {
+  strip.setBrightness(brightness);
 }

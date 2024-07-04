@@ -7,11 +7,12 @@
 #include <led.h>
 
 #define THRESHOLD 80 //in cm
+#define TOGGLE_DISTANCE 10 //in cm
 
-#define USS1_PIN 23
-#define USS2_PIN 24
-#define USS3_PIN 25
-#define USS4_PIN 26
+#define USS1_PIN 22
+#define USS2_PIN 1
+#define USS3_PIN 3
+#define USS4_PIN 21
 
 
 Ultrasonic uss_1(USS1_PIN);
@@ -19,7 +20,10 @@ Ultrasonic uss_2(USS2_PIN);
 Ultrasonic uss_3(USS3_PIN);
 Ultrasonic uss_4(USS4_PIN);
 
-Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+bool activeSensors[4] = {true, true, true, true};
+
+int currentBrightness = 0;
+int fadeDelay = 10;  
 
 WiFiClient net;
 MQTTClient client; 
@@ -49,10 +53,17 @@ void messageReceived(String &topic, String &payload) {
 
 void setup() {
     Serial.begin(115200);
-    strip.begin();
     setAll(255,128,0);
 
     WiFiManager wm;
+
+    WiFiManagerParameter custom_mqtt_server("server", "mqtt server", MQTT_URL, 40);
+    wm.addParameter(&custom_mqtt_server);
+    WiFiManagerParameter custom_mqtt_topic("topic", "mqtt topic", MQTT_TOPIC, 40);
+    wm.addParameter(&custom_mqtt_topic);
+
+
+
     bool res;
     res = wm.autoConnect(AP_SSID,AP_PASSWORD);
 
@@ -64,7 +75,7 @@ void setup() {
       setAll(0,255,0);
     }
 
-    client.begin(MQTT_URL, net);
+    client.begin(custom_mqtt_server.getValue(), net);
     client.onMessage(messageReceived);
     connect();
 }
@@ -79,26 +90,28 @@ void loop() {
     connect();
   }
 
-  strip.clear();
+  Serial.println("start:");
 
   int triggeredCount = 0;
-
   if (uss_1.MeasureInCentimeters() < THRESHOLD) {
-    triggeredCount++;
-  }
-  if (uss_2.MeasureInCentimeters() < THRESHOLD) {
     triggeredCount++;
   }
   if (uss_3.MeasureInCentimeters() < THRESHOLD) {
     triggeredCount++;
   }
-  if (uss_4.MeasureInCentimeters() < THRESHOLD) {
+/*  if (uss_2.MeasureInCentimeters() < THRESHOLD) {
     triggeredCount++;
   }
+  if (uss_4.MeasureInCentimeters() < THRESHOLD) {
+    triggeredCount++;
+  }*/
 
-  int brightness = map(0, 0, 4, 0, 255);
-  strip.setBrightness(brightness);
-  strip.show();
-  
-  delay(1000);
+  Serial.println(triggeredCount);
+
+  int brightness = map(triggeredCount, 0, 4, 0, 255);
+  Serial.println(brightness);
+  SetBrightness(brightness);
+  FadeIn(255,0,0);
+  delay(2000);
+  FadeOut(255,0,0);
 }
