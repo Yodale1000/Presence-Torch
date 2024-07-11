@@ -8,6 +8,7 @@
 
 #define THRESHOLD 80 //in cm
 #define TOGGLE_DISTANCE 10 //in cm
+#define DELAY 5000
 
 #define USS1_PIN 22
 #define USS2_PIN 1
@@ -78,6 +79,7 @@ void setup() {
     client.begin(custom_mqtt_server.getValue(), net);
     client.onMessage(messageReceived);
     connect();
+    setAll(0,0,0);  
 }
 
 
@@ -86,32 +88,44 @@ void loop() {
   delay(10);
 
   if (!client.connected()) {
-    setAll(255,0,0);
     connect();
   }
 
-  Serial.println("start:");
-
   int triggeredCount = 0;
   if (uss_1.MeasureInCentimeters() < THRESHOLD) {
-    triggeredCount++;
+    triggeredCount += 4;
   }
+  /*
   if (uss_3.MeasureInCentimeters() < THRESHOLD) {
-    triggeredCount++;
+    triggeredCount += 4;
   }
-/*  if (uss_2.MeasureInCentimeters() < THRESHOLD) {
+  if (uss_2.MeasureInCentimeters() < THRESHOLD) {
     triggeredCount++;
   }
   if (uss_4.MeasureInCentimeters() < THRESHOLD) {
     triggeredCount++;
-  }*/
+  }
+  */
 
-  Serial.println(triggeredCount);
 
-  int brightness = map(triggeredCount, 0, 4, 0, 255);
-  Serial.println(brightness);
-  SetBrightness(brightness);
-  FadeIn(255,0,0);
-  delay(2000);
-  FadeOut(255,0,0);
+  if (triggeredCount > 0)
+  {
+    for(int i = 0; i < triggeredCount; i++ ) {
+      Serial.println("Fade in");
+      Serial.println(i);
+      FadeInPixel(i,255,100,0);
+    }
+
+    delay(DELAY);
+
+    for(int i = triggeredCount; i >= 0; i-- ) {
+      Serial.println("Fade out");
+      Serial.println(i);
+      FadeOutPixel(i-1,255,100,0);
+    }
+
+   delay(2000);
+  }
+
+
 }
