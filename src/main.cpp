@@ -6,126 +6,150 @@
 #include <secrets.h>
 #include <led.h>
 
-#define THRESHOLD 80 //in cm
-#define TOGGLE_DISTANCE 10 //in cm
+// Konfiguration
+#define THRESHOLD 80 // in cm
+#define TOGGLE_DISTANCE 1 // in cm
 #define DELAY 5000
 
-#define USS1_PIN 22
-#define USS2_PIN 1
-#define USS3_PIN 3
-#define USS4_PIN 21
+#define MQTT_TASK_STACK_SIZE 4096
+#define SENSOR_TASK_STACK_SIZE 4096
 
+#define NUM_SENSORS 4
+#define USS1_PIN 18
+#define USS2_PIN 19
+#define USS3_PIN 21
+#define USS4_PIN 22
 
-Ultrasonic uss_1(USS1_PIN);
-Ultrasonic uss_2(USS2_PIN);
-Ultrasonic uss_3(USS3_PIN);
-Ultrasonic uss_4(USS4_PIN);
-
-bool activeSensors[4] = {true, true, true, true};
-
-int currentBrightness = 0;
-int fadeDelay = 10;  
+Ultrasonic sensors[NUM_SENSORS] = {
+  Ultrasonic(USS1_PIN),
+  Ultrasonic(USS2_PIN),
+  Ultrasonic(USS3_PIN),
+  Ultrasonic(USS4_PIN)
+};
 
 WiFiClient net;
 MQTTClient client; 
 
-void connect() {
-  Serial.print("checking wifi...");
+unsigned long lastMillis = 0;
+
+// Funktionsdeklarationen
+void connectWiFi();
+void connectMQTT();
+void messageReceived(String &topic, String &payload);
+void mqttTask(void *pvParameters);
+void sensorTask(void *pvParameters);
+void startTasks();
+
+// Verbindung zu WiFi herstellen
+void connectWiFi() {
+  Serial.print("Checking WiFi...");
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
     delay(1000);
   }
+  Serial.println("\nWiFi connected!");
+}
 
-  Serial.print("\nconnecting...");
+// Verbindung zu MQTT herstellen
+void connectMQTT() {
+  Serial.print("Connecting to MQTT...");
   while (!client.connect(DEVICE_NAME)) {
     Serial.print(".");
     delay(1000);
   }
-
-  Serial.println("\nconnected!");
-
-  client.subscribe(MQTT_TOPIC);
+  Serial.println("\nMQTT connected!");
+  client.subscribe(MQTT_TOPIC_INCOMING, 2);
 }
 
+// Empfangene MQTT-Nachrichten verarbeiten
 void messageReceived(String &topic, String &payload) {
-  Serial.println("incoming: " + topic + " - " + payload);
+  Serial.println("Incoming: " + topic + " - " + payload);
+  int triggeredCount = payload.toInt();
+  for (int i = 0; i < triggeredCount; i++) {
+    FadeInPixel(i, 255, 100, 0);
+  }
+  delay(DELAY);
+  for (int i = triggeredCount; i >= 0; i--) {
+    FadeOutPixel(i - 1, 255, 100, 0);
+  }
+  delay(2000);
 }
 
-
+// Setup-Funktion
 void setup() {
-    Serial.begin(115200);
-    setAll(255,128,0);
+  Serial.begin(9600);
+  setAll(255, 128, 0);
 
-    WiFiManager wm;
+  WiFiManager wm;
+  WiFiManagerParameter custom_device_name("device_name", "device name", DEVICE_NAME, 40);
+  wm.addParameter(&custom_device_name);
 
-    WiFiManagerParameter custom_mqtt_server("server", "mqtt server", MQTT_URL, 40);
-    wm.addParameter(&custom_mqtt_server);
-    WiFiManagerParameter custom_mqtt_topic("topic", "mqtt topic", MQTT_TOPIC, 40);
-    wm.addParameter(&custom_mqtt_topic);
+  WiFiManagerParameter custom_mqtt_server("mqtt_server", "mqtt server", MQTT_SERVER, 40);
+  wm.addParameter(&custom_mqtt_server);
+  WiFiManagerParameter custom_mqtt_topic_incoming("mqtt_topic_incoming", "mqtt topic incoming", MQTT_TOPIC_INCOMING, 40);
+  wm.addParameter(&custom_mqtt_topic_incoming);
+  WiFiManagerParameter custom_mqtt_topic_outgoing("mqtt_topic_outgoing", "mqtt topic outgoing", MQTT_TOPIC_OUTGOING, 40);
+  wm.addParameter(&custom_mqtt_topic_outgoing);
 
+  bool res = wm.autoConnect(AP_SSID, AP_PASSWORD);
 
+  if (!res) {
+    setAll(255, 0, 0); // Rot: Verbindungsfehler
+  } else {
+    setAll(0, 255, 0); // Grün: Erfolgreich verbunden
+  }
 
-    bool res;
-    res = wm.autoConnect(AP_SSID,AP_PASSWORD);
+  client.begin(custom_mqtt_server.getValue(), net);
+  client.onMessage(messageReceived);
+  connectWiFi();
+  connectMQTT();
+  setAll(0, 0, 0);  
 
-    if(!res) {
-      setAll(255,0,0);
-    } 
-    else 
-    {
-      setAll(0,255,0);
+  startTasks(); // Starte die FreeRTOS-Tasks
+}
+
+// MQTT-Task
+void mqttTask(void *pvParameters) {
+  while (true) {
+    client.loop();
+    if (!client.connected()) {
+      connectMQTT();
+    }
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+}
+
+// Sensor-Task
+void sensorTask(void *pvParameters) {
+  while (true) {
+    int triggeredCount = 0;
+
+    for (int i = 0; i < 4; i++) {
+      int distance = sensors[i].MeasureInCentimeters();
+      Serial.print("Sensor "); Serial.print(i+1); Serial.print(": "); Serial.println(distance);
+
+      if (distance < THRESHOLD && distance >= 10) {
+        triggeredCount += 4;
+      }
     }
 
-    client.begin(custom_mqtt_server.getValue(), net);
-    client.onMessage(messageReceived);
-    connect();
-    setAll(0,0,0);  
+    Serial.print("Triggered Count: "); Serial.println(triggeredCount);
+
+    if (triggeredCount > 0 && millis() - lastMillis > 1000) {
+      lastMillis = millis();
+      client.publish(MQTT_TOPIC_OUTGOING, String(triggeredCount));
+    }
+
+    vTaskDelay(2000 / portTICK_PERIOD_MS); // Sensoren jede 2000ms prüfen
+  }
 }
 
+// FreeRTOS-Tasks starten
+void startTasks() {
+  xTaskCreate(mqttTask, "MQTT Task", MQTT_TASK_STACK_SIZE, NULL, 1, NULL);
+  xTaskCreate(sensorTask, "Sensor Task", SENSOR_TASK_STACK_SIZE, NULL, 1, NULL);
+}
 
 void loop() {
-  client.loop();
-  delay(10);
-
-  if (!client.connected()) {
-    connect();
-  }
-
-  int triggeredCount = 0;
-  if (uss_1.MeasureInCentimeters() < THRESHOLD) {
-    triggeredCount += 4;
-  }
-  /*
-  if (uss_3.MeasureInCentimeters() < THRESHOLD) {
-    triggeredCount += 4;
-  }
-  if (uss_2.MeasureInCentimeters() < THRESHOLD) {
-    triggeredCount++;
-  }
-  if (uss_4.MeasureInCentimeters() < THRESHOLD) {
-    triggeredCount++;
-  }
-  */
-
-
-  if (triggeredCount > 0)
-  {
-    for(int i = 0; i < triggeredCount; i++ ) {
-      Serial.println("Fade in");
-      Serial.println(i);
-      FadeInPixel(i,255,100,0);
-    }
-
-    delay(DELAY);
-
-    for(int i = triggeredCount; i >= 0; i-- ) {
-      Serial.println("Fade out");
-      Serial.println(i);
-      FadeOutPixel(i-1,255,100,0);
-    }
-
-   delay(2000);
-  }
-
-
+  // Loop bleibt leer, da alle Aufgaben in FreeRTOS-Tasks ausgelagert wurden
 }
